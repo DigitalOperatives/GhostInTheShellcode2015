@@ -356,12 +356,8 @@ std::string solve(const Board& board, size_t maxMoves) {
     //std::cerr << "Solving for board: " << std::endl << board << std::endl << std::endl;
     double percentDone = -1.0;
     ssize_t rangeSize = maxMoves * 2 + 1;
-    size_t counter = 0;
-    for(size_t rd=0; rd<=maxMoves; ++rd) {
-        for(ssize_t polarity : {-1, 1}) {
-            if(rd == 0 && polarity == -1) {
-                continue;
-            }
+    //size_t counter = 0;
+    for(ssize_t rowDelta=-maxMoves; rowDelta<=static_cast<ssize_t>(maxMoves); ++rowDelta) {
         for(ssize_t colDelta=-maxMoves; colDelta<=static_cast<ssize_t>(maxMoves); ++colDelta) {
             double lastPercent = percentDone;
             percentDone = double(size_t(double((rowDelta + maxMoves) * rangeSize + (colDelta + maxMoves)) / double(rangeSize * rangeSize) * 1000.0 + 0.5)) / 10.0;
