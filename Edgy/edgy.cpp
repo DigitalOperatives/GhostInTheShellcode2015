@@ -15,6 +15,8 @@
 
 #include <boost/dynamic_bitset.hpp>
 
+#include "concurrent_work_queue.h"
+
 class Board {
 private:
     std::vector<boost::dynamic_bitset<>> rows;
@@ -400,6 +402,69 @@ std::string solve(const Board& board, size_t maxMoves) {
     return "";
 }
 
+std::string parallelSolve(const Board& board, size_t maxMoves) {
+    typedef std::pair<ssize_t,ssize_t> Job;
+    double percentDone = -1.0;
+    ssize_t rangeSize = maxMoves * 2 + 1;
+    auto statusCallback = [&percentDone,rangeSize,maxMoves](const Job& job) {
+        double lastPercent = percentDone;
+        percentDone = double(size_t(double((job.first + maxMoves) * rangeSize + (job.second + maxMoves)) / double(rangeSize * rangeSize) * 1000.0 + 0.5)) / 10.0;
+        if(percentDone > lastPercent) {
+            std::cerr << "\x1b[2K\r" << "Solving for up to " << maxMoves << " moves... " << percentDone << "%";
+        }
+    };
+    std::string finalSolution = "";
+    concurrent::ConcurrentWorkQueue<Job> queue([&board,maxMoves,&finalSolution](Job &job) -> bool {
+            auto rowDelta = job.first;
+            auto colDelta = job.second;
+            
+            if(static_cast<size_t>(absDiff(rowDelta, 0) + absDiff(colDelta, 0)) > maxMoves || (rowDelta == 0 && colDelta == 0)) {
+                return true;
+            }
+            size_t rowShiftsRequired = 1;
+            if(rowDelta < 0) {
+                rowShiftsRequired += board.getPlayerRow() / -rowDelta;
+            } else if(rowDelta != 0) {
+                rowShiftsRequired += (board.numRows() - board.getPlayerRow()) / rowDelta;
+            }
+            size_t colShiftsRequired = 1;
+            if(colDelta < 0) {
+                colShiftsRequired += board.getPlayerCol() / -colDelta;
+            } else if(colDelta != 0) {
+                colShiftsRequired += (board.numCols() - board.getPlayerCol()) / colDelta;
+            }
+            size_t shiftsRequired = std::max(rowShiftsRequired, colShiftsRequired);
+            //std::cerr << "Shifts required for delta " << rowDelta << ", " << colDelta << ": " << shiftsRequired << std::endl;
+            Board shifted = board.orShift(rowDelta, colDelta);
+            for(size_t i=1; i<shiftsRequired; ++i) {
+                shifted = shifted.orShift(rowDelta, colDelta);
+            }
+            //std::cerr << "Shifted board: " << std::endl << shifted << std::endl << std::endl;
+            if(shifted.hasMine(shifted.getPlayerRow(), shifted.getPlayerCol())) {
+                return true;
+            }
+            auto solution = astar(shifted, static_cast<ssize_t>(board.getPlayerRow()) + rowDelta, static_cast<ssize_t>(board.getPlayerCol()) + colDelta, maxMoves);
+            if(solution.length() > 0) {
+                std::cerr << "\x1b[2K\r";
+                finalSolution = solution;
+                return false;
+            }
+            return true;
+        }, statusCallback);
+
+    //size_t counter = 0;
+    for(ssize_t rowDelta=-maxMoves; rowDelta<=static_cast<ssize_t>(maxMoves); ++rowDelta) {
+        for(ssize_t colDelta=-maxMoves; colDelta<=static_cast<ssize_t>(maxMoves); ++colDelta) {
+            queue(std::make_pair(rowDelta, colDelta));
+        }
+    }
+
+    queue.join();
+
+    std::cerr << "\x1b[2K\r";
+    return finalSolution;
+}
+
 int play(const char* host, const char* port) {
     Client client(host, port);
     if(client.readline() != "Password") {
@@ -423,13 +488,17 @@ int play(const char* host, const char* port) {
         if(*moveIntOffset != '\0') {
             maxMoves = atoll(moveIntOffset);
         }
-        auto solution = solve(board, maxMoves);
+        auto solution = parallelSolve(board, maxMoves);
         std::cout << solution << std::endl;
         client.send(solution + "\n");
     }
     return 0;
 }
 
-int main(int, char**) {
-    return play("edgy.2015.ghostintheshellcode.com", "44440");
+int main(int argc, char** argv) {
+    if(argc >= 3) {
+        return play(argv[1], argv[2]);
+    } else {
+        return play("edgy.2015.ghostintheshellcode.com", "44440");
+    }
 }
